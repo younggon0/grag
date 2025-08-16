@@ -46,6 +46,8 @@ if 'index' not in st.session_state:
     st.session_state.existing_data_loaded = False
     st.session_state.current_content = None
     st.session_state.current_source = None
+    st.session_state.neo4j_status = 'unknown'
+    st.session_state.neo4j_message = 'Initializing...'
 
 @st.cache_resource
 def init_llama_index():
@@ -92,6 +94,9 @@ def init_llama_index():
     neo4j_password = os.getenv('NEO4J_PASSWORD')
     
     graph_store = None
+    neo4j_status = "disconnected"
+    neo4j_message = "No Neo4j credentials"
+    
     if neo4j_uri and neo4j_user and neo4j_password:
         try:
             graph_store = Neo4jPropertyGraphStore(
@@ -99,11 +104,15 @@ def init_llama_index():
                 username=neo4j_user,
                 password=neo4j_password
             )
-            st.success("✅ Connected to Neo4j")
+            neo4j_status = "connected"
+            neo4j_message = "Connected to Neo4j"
         except Exception as e:
-            st.warning(f"⚠️ Neo4j connection failed: {str(e)}. Using in-memory graph.")
-    else:
-        st.info("ℹ️ Using in-memory graph (no Neo4j credentials found)")
+            neo4j_status = "error"
+            neo4j_message = f"Connection failed: {str(e)[:50]}..."
+    
+    # Store status in session state for display
+    st.session_state.neo4j_status = neo4j_status
+    st.session_state.neo4j_message = neo4j_message
     
     return llm, embed_model, graph_store
 
@@ -153,10 +162,12 @@ def load_existing_data_from_neo4j():
                     pass
                 
                 st.session_state.existing_data_loaded = True
-                st.success(f"✅ Loaded existing knowledge graph with {len(triplets)} relationships from Neo4j")
+                # Store loaded data info in session state instead of showing prominent message
+                st.session_state.loaded_relationships = len(triplets)
                 
     except Exception as e:
-        st.warning(f"Could not load existing data from Neo4j: {str(e)}")
+        # Store error in session state instead of showing warning
+        st.session_state.neo4j_load_error = str(e)
     
     st.session_state.existing_data_loaded = True
 
@@ -364,18 +375,47 @@ def create_pyvis_graph(index: PropertyGraphIndex) -> str:
     return html_content
 
 def main():
-    st.title("🧠 Universal Knowledge Graph Builder v2")
+    st.title("🧠 Universal Knowledge Graph Builder")
     st.markdown("Build knowledge graphs with document indexing and source attribution using LlamaIndex")
     
-    # Initialize components
+    # Initialize components (this sets neo4j_status in session state)
     llm, embed_model, graph_store = init_llama_index()
     
     # Load existing data from Neo4j if available
     load_existing_data_from_neo4j()
     
+    # Get Neo4j status from session state (should be set by init_llama_index)
+    neo4j_status = getattr(st.session_state, 'neo4j_status', 'unknown')
+    neo4j_message = getattr(st.session_state, 'neo4j_message', 'Status unknown')
+    
+    # Force status update if still unknown
+    if neo4j_status == 'unknown':
+        if graph_store is not None:
+            st.session_state.neo4j_status = 'connected'
+            st.session_state.neo4j_message = 'Connected to Neo4j'
+        else:
+            st.session_state.neo4j_status = 'disconnected'
+            st.session_state.neo4j_message = 'No Neo4j connection'
+        neo4j_status = st.session_state.neo4j_status
+        neo4j_message = st.session_state.neo4j_message
+    
+    # Status indicator styling
+    status_color = {
+        'connected': '#28a745',  # green
+        'error': '#dc3545',      # red
+        'disconnected': '#6c757d' # gray
+    }.get(neo4j_status, '#6c757d')
+    
+    status_icon = {
+        'connected': '🟢',
+        'error': '🔴', 
+        'disconnected': '⚪'
+    }.get(neo4j_status, '⚪')
+    
     # Sidebar
     with st.sidebar:
         st.header("📁 Document Input")
+        
         
         # Input method selection
         input_method = st.radio(
@@ -530,6 +570,14 @@ def main():
                         pass
                 st.success("Graph cleared!")
                 st.rerun()
+        
+        # Small Neo4j status at bottom of sidebar
+        st.divider()
+        with st.expander("ℹ️ Database Status", expanded=False):
+            st.write(f"{status_icon} **Neo4j**: {neo4j_status.title()}")
+            st.caption(neo4j_message)
+            # Debug info (remove after testing)
+            st.caption(f"Debug: status={neo4j_status}, has_graph_store={graph_store is not None}")
     
     # Main content area
     tab1, tab2, tab3 = st.tabs(["🌐 Graph Visualization", "❓ Q&A with Sources", "📝 Raw Triplets"])
