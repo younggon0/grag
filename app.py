@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import List, Optional
 import asyncio
 import nest_asyncio
+import logging
 
 # LlamaIndex imports
 from llama_index.core import Document, PropertyGraphIndex, Settings
@@ -28,6 +29,17 @@ import pandas as pd
 
 # Load environment variables
 load_dotenv()
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('knowledge_graph_builder.log')
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Page configuration
 st.set_page_config(
@@ -49,11 +61,8 @@ if 'index' not in st.session_state:
     st.session_state.neo4j_status = 'unknown'
     st.session_state.neo4j_message = 'Initializing...'
 
-@st.cache_resource
-def init_llama_index():
-    """Initialize LlamaIndex components"""
-    
-    # Fix asyncio event loop issue for Streamlit
+def setup_event_loop():
+    """Setup asyncio event loop for Streamlit compatibility"""
     try:
         loop = asyncio.get_event_loop()
         if loop.is_closed():
@@ -63,6 +72,11 @@ def init_llama_index():
     
     # Apply nest_asyncio to allow nested event loops
     nest_asyncio.apply()
+
+@st.cache_resource
+def init_llama_index():
+    """Initialize LlamaIndex components"""
+    setup_event_loop()
     
     # Check API key
     api_key = os.getenv('ANTHROPIC_API_KEY')
@@ -122,14 +136,7 @@ def load_existing_data_from_neo4j():
         return
     
     try:
-        # Ensure we have event loop set up
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                asyncio.set_event_loop(asyncio.new_event_loop())
-        except RuntimeError:
-            asyncio.set_event_loop(asyncio.new_event_loop())
-        
+        setup_event_loop()
         llm, embed_model, graph_store = init_llama_index()
         
         if graph_store:
@@ -158,18 +165,18 @@ def load_existing_data_from_neo4j():
                         existing_sources = [row['source'] for row in result]
                         st.session_state.documents.extend(existing_sources)
                         st.session_state.documents = list(set(st.session_state.documents))  # Remove duplicates
-                except:
-                    pass
+                except Exception as e:
+                    # Log but don't fail - this is just metadata collection
+                    logger.warning(f"Failed to retrieve document sources from Neo4j: {str(e)}")
                 
-                st.session_state.existing_data_loaded = True
                 # Store loaded data info in session state instead of showing prominent message
                 st.session_state.loaded_relationships = len(triplets)
+                st.session_state.existing_data_loaded = True  # Only set on success
                 
     except Exception as e:
-        # Store error in session state instead of showing warning
+        # Store error in session state for debugging, but don't mark as loaded
         st.session_state.neo4j_load_error = str(e)
-    
-    st.session_state.existing_data_loaded = True
+        # Keep existing_data_loaded = False to allow retry attempts
 
 def process_document(content: str, source_name: str, index: Optional[PropertyGraphIndex] = None):
     """Process a document and add to knowledge graph"""
@@ -209,14 +216,21 @@ def process_document(content: str, source_name: str, index: Optional[PropertyGra
                 # Use the insert method to add a single document
                 index.insert(document)
             except Exception as e:
-                st.error(f"Error adding document to existing index: {str(e)}")
-                # Fallback: create new index
-                index = PropertyGraphIndex.from_documents(
-                    [document],
-                    property_graph_store=graph_store,
-                    kg_extractors=[kg_extractor],
-                    show_progress=True
-                )
+                # Log the specific error for debugging
+                error_msg = f"Failed to insert document '{source_name}' into existing index: {str(e)}"
+                st.error(error_msg)
+                
+                # Ask user before creating new index (potential data loss)
+                if st.checkbox("⚠️ Create new index? This will replace existing graph data.", key=f"confirm_new_index_{source_name}"):
+                    st.warning("Creating new index - existing graph data will be lost!")
+                    index = PropertyGraphIndex.from_documents(
+                        [document],
+                        property_graph_store=graph_store,
+                        kg_extractors=[kg_extractor],
+                        show_progress=True
+                    )
+                else:
+                    st.stop()  # Don't proceed without user confirmation
     
     return index
 
@@ -363,22 +377,36 @@ def create_pyvis_graph(index: PropertyGraphIndex) -> str:
                 )
                 
         except Exception as e:
-            # Skip problematic triplets
+            # Log and skip problematic triplets
+            logger.warning(f"Skipping malformed triplet during visualization: {str(e)}")
             continue
     
     if len(nodes_added) == 0:
         return "<p>No valid graph data found to visualize</p>"
     
-    # Generate HTML
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.html', mode='w') as tmp:
-        net.save_graph(tmp.name)
-        tmp_path = tmp.name
+    # Generate HTML with proper cleanup
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.html', mode='w') as tmp:
+            net.save_graph(tmp.name)
+            tmp_path = tmp.name
+        
+        with open(tmp_path, 'r') as f:
+            html_content = f.read()
+        
+        return html_content
     
-    with open(tmp_path, 'r') as f:
-        html_content = f.read()
-    
-    os.unlink(tmp_path)
-    return html_content
+    except Exception as e:
+        # If any error occurs, still attempt to clean up temp file
+        raise e
+    finally:
+        # Always clean up temp file, even on exceptions
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError as e:
+                # Log but don't fail if we can't delete temp file
+                logger.warning(f"Failed to delete temporary file {tmp_path}: {str(e)}")
 
 def main():
     st.title("🧠 Universal Knowledge Graph Builder")
@@ -563,18 +591,44 @@ def main():
         # Clear graph option
         if st.session_state.index:
             st.divider()
-            if st.button("🗑️ Clear Graph", type="secondary"):
-                st.session_state.index = None
-                st.session_state.query_engine = None
-                st.session_state.documents = []
-                if graph_store:
-                    # Clear Neo4j
-                    try:
-                        graph_store.structured_query("MATCH (n) DETACH DELETE n")
-                    except:
-                        pass
-                st.success("Graph cleared!")
-                st.rerun()
+            st.warning("⚠️ **Danger Zone**")
+            
+            # Initialize confirmation state
+            if 'clear_confirmed' not in st.session_state:
+                st.session_state.clear_confirmed = False
+            
+            # Two-step confirmation process
+            if not st.session_state.clear_confirmed:
+                if st.button("🗑️ Clear Graph", type="secondary"):
+                    st.session_state.clear_confirmed = True
+                    st.rerun()
+            else:
+                st.error("⚠️ **PERMANENT DATA DELETION**")
+                st.write("This will permanently delete ALL graph data from Neo4j, including data from other applications that may be using the same database.")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("❌ Cancel", type="secondary"):
+                        st.session_state.clear_confirmed = False
+                        st.rerun()
+                with col2:
+                    if st.button("💀 DELETE ALL DATA", type="primary"):
+                        st.session_state.index = None
+                        st.session_state.query_engine = None
+                        st.session_state.documents = []
+                        st.session_state.clear_confirmed = False
+                        
+                        if graph_store:
+                            # Clear Neo4j with proper error handling
+                            try:
+                                result = graph_store.structured_query("MATCH (n) DETACH DELETE n")
+                                st.success("✅ Graph data deleted from Neo4j")
+                            except Exception as e:
+                                st.error(f"❌ Failed to delete Neo4j data: {str(e)}")
+                        else:
+                            st.success("✅ Local graph data cleared")
+                        
+                        st.rerun()
         
         # Small Neo4j status at bottom of sidebar
         st.divider()
@@ -710,8 +764,9 @@ def main():
                                         'Relationship': rel.strip(),
                                         'Object': obj.strip()
                                     })
-                            except Exception:
-                                # Skip problematic triplets
+                            except Exception as e:
+                                # Log and skip problematic triplets
+                                logger.warning(f"Skipping malformed triplet in raw data display: {str(e)}")
                                 continue
                         
                         if data:

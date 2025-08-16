@@ -291,32 +291,50 @@ class Neo4jManager:
                     }
                     
         except Exception as e:
-            # Fallback if APOC is not available
-            try:
-                with self.driver.session() as session:
-                    result = session.run("""
-                        MATCH path = (start:Entity {name: $name})-[:RELATES_TO*0..""" + str(depth) + """]-()
-                        UNWIND nodes(path) as node
-                        WITH collect(DISTINCT node) as nodes
-                        MATCH (source:Entity)-[r:RELATES_TO]->(target:Entity)
-                        WHERE source IN nodes AND target IN nodes
-                        RETURN 
-                            collect(DISTINCT {
-                                name: source.name, 
-                                type: source.type, 
-                                description: source.description
-                            }) + collect(DISTINCT {
-                                name: target.name, 
-                                type: target.type, 
-                                description: target.description
-                            }) as entities,
-                            collect(DISTINCT {
-                                source: source.name, 
-                                target: target.name, 
-                                type: r.type, 
-                                description: r.description
-                            }) as relationships
-                    """, name=entity_name)
+            # Check if APOC is available first
+            if "apoc.neighbors.athop" in str(e) or "Unknown function" in str(e):
+                print(f"APOC not available, using fallback query: {str(e)}")
+                # Use more efficient fallback without variable-length paths
+                try:
+                    with self.driver.session() as session:
+                        # Use multiple fixed-depth queries instead of variable-length paths
+                        all_entities = set()
+                        all_relationships = []
+                        
+                        # Progressively expand from the center entity
+                        for current_depth in range(1, depth + 1):
+                            result = session.run("""
+                                MATCH (start:Entity {name: $name})
+                                MATCH path = (start)-[:RELATES_TO*""" + str(current_depth) + """]->(end:Entity)
+                                UNWIND nodes(path) as node
+                                RETURN DISTINCT node.name as name, node.type as type, node.description as description
+                            """, name=entity_name)
+                            
+                            for record in result:
+                                all_entities.add((record['name'], record['type'], record['description']))
+                        
+                        # Get relationships between all found entities
+                        entity_names = [e[0] for e in all_entities]
+                        result = session.run("""
+                            MATCH (source:Entity)-[r:RELATES_TO]->(target:Entity)
+                            WHERE source.name IN $entity_names AND target.name IN $entity_names
+                            RETURN 
+                                collect(DISTINCT {
+                                    name: source.name, 
+                                    type: source.type, 
+                                    description: source.description
+                                }) + collect(DISTINCT {
+                                    name: target.name, 
+                                    type: target.type, 
+                                    description: target.description
+                                }) as entities,
+                                collect(DISTINCT {
+                                    source: source.name, 
+                                    target: target.name, 
+                                    type: r.type, 
+                                    description: r.description
+                                }) as relationships
+                        """, entity_names=entity_names)
                     
                     record = result.single()
                     if record:
@@ -326,7 +344,10 @@ class Neo4jManager:
                             'entities': list(entities),
                             'relationships': record['relationships']
                         }
-            except:
-                pass
+            except Exception as fallback_e:
+                print(f"Fallback query also failed: {str(fallback_e)}")
+            else:
+                # Other error not related to APOC
+                print(f"Neo4j query error: {str(e)}")
                 
         return {'entities': [], 'relationships': []}
