@@ -1,20 +1,32 @@
-# Universal Knowledge-Graph Builder - Implementation Plan
+# Universal Knowledge-Graph Builder - Implementation Plan (v2)
 
 ## Project Overview
 **Goal**: Build a Streamlit app that converts documents into an interactive knowledge graph with NL Q&A capabilities.
-**Time Limit**: 2 hours
+**Time Limit**: 2 hours (original) + 1 hour enhancement
 **Key Requirements**:
 - Ingest TXT files and URLs (≤ 100 MB total)
 - Build a graph of concepts with node/edge visualization
 - Support natural language questions over the graph
+- **NEW**: Maintain document indexing with source attribution
+- **NEW**: Link entities back to original document chunks
 
 ## Technical Stack
+
+### Current Implementation
 - **LLM**: Anthropic Claude API (via LangChain)
 - **Framework**: LangChain for orchestration
 - **UI**: Streamlit
 - **Graph Processing**: NetworkX
+- **Graph Database**: Neo4j for persistence
 - **Visualization**: Pyvis (interactive HTML graphs)
-- **Document Processing**: LangChain document loaders and text splitters
+- **Document Processing**: LangChain text splitters
+
+### Proposed Enhancement with LlamaIndex
+- **Graph Framework**: LlamaIndex PropertyGraphIndex
+- **Graph Store**: Neo4jPropertyGraphStore (built-in integration)
+- **Extraction**: SimpleLLMPathExtractor / SchemaLLMPathExtractor
+- **Query Engine**: GraphRAGQueryEngine with source attribution
+- **Document Index**: Automatic chunk-to-entity linking
 
 ## Implementation Timeline (2 Hours)
 
@@ -107,6 +119,66 @@ Provide a clear answer with references to entities and relationships.
 - Sample documents
 - Quick testing
 
+## Enhancement Plan - LlamaIndex Integration (1 Hour)
+
+### Phase 1: Research & Planning (10 mins)
+- Review LlamaIndex GraphRAG v2 documentation
+- Identify gap between current implementation and LlamaIndex approach
+- Plan migration strategy
+
+### Phase 2: LlamaIndex Setup (15 mins)
+```bash
+pip install llama-index-core
+pip install llama-index-llms-anthropic
+pip install llama-index-graph-stores-neo4j
+pip install llama-index-embeddings-openai  # or another embedder
+```
+
+### Phase 3: Refactor Core Components (20 mins)
+```python
+from llama_index.core import PropertyGraphIndex, Document
+from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
+from llama_index.llms.anthropic import Anthropic
+from llama_index.core.indices.property_graph import SimpleLLMPathExtractor
+
+# Initialize Neo4j store
+graph_store = Neo4jPropertyGraphStore(
+    uri=NEO4J_URI,
+    username=NEO4J_USERNAME,
+    password=NEO4J_PASSWORD
+)
+
+# Create extractor with Claude
+llm = Anthropic(api_key=ANTHROPIC_API_KEY, model="claude-3-haiku-20240307")
+kg_extractor = SimpleLLMPathExtractor(llm=llm)
+
+# Build index with document tracking
+index = PropertyGraphIndex.from_documents(
+    documents,
+    property_graph_store=graph_store,
+    kg_extractors=[kg_extractor],
+    show_progress=True
+)
+```
+
+### Phase 4: Update Q&A with Source Attribution (10 mins)
+```python
+# Query with source tracking
+query_engine = index.as_query_engine(
+    include_text=True,  # Include source text
+    response_mode="tree_summarize",
+    verbose=True
+)
+
+response = query_engine.query("Who founded Apple?")
+# response.source_nodes contains the original chunks
+```
+
+### Phase 5: UI Updates (5 mins)
+- Add source display in Q&A responses
+- Show which document/chunk entities came from
+- Add "View Source" buttons for entities
+
 ## Component Architecture
 
 ```
@@ -128,6 +200,26 @@ grag/
 ```
 
 ## Key Implementation Details
+
+### Current vs LlamaIndex Approach
+
+| Feature | Current Implementation | LlamaIndex Enhancement |
+|---------|----------------------|----------------------|
+| Entity Extraction | Custom Claude prompts | SimpleLLMPathExtractor |
+| Document Index | Not implemented | PropertyGraphIndex (automatic) |
+| Source Attribution | Not available | Built-in with source_nodes |
+| Neo4j Integration | Custom manager | Neo4jPropertyGraphStore |
+| Chunk-Entity Links | Manual tracking needed | Automatic |
+| Query Engine | Custom context retrieval | GraphRAGQueryEngine |
+| Graph Communities | Not implemented | Built-in clustering |
+
+### Benefits of LlamaIndex Migration
+1. **Document Tracking**: Automatic linking of entities to source chunks
+2. **Source Citations**: Every answer includes source references
+3. **Better Retrieval**: Hybrid search (graph + vector + keyword)
+4. **Production Ready**: Battle-tested components
+5. **Less Code**: ~50% reduction in custom code
+6. **Maintenance**: Community-maintained and updated
 
 ### Entity Extraction Strategy
 1. Process each chunk independently
@@ -153,11 +245,22 @@ grag/
 4. Validation for file size limits
 
 ## Success Metrics
-- [ ] Successfully load and process TXT files
-- [ ] Extract and visualize at least 20 entities
-- [ ] Display interactive graph with zoom/pan
-- [ ] Answer at least 3 different types of questions
-- [ ] Complete implementation within 2 hours
+
+### Original Goals (Completed ✅)
+- [x] Successfully load and process TXT files
+- [x] Extract and visualize at least 20 entities
+- [x] Display interactive graph with zoom/pan
+- [x] Answer at least 3 different types of questions
+- [x] Complete implementation within 2 hours
+
+### Enhanced Goals (With LlamaIndex)
+- [ ] Implement document indexing with PropertyGraphIndex
+- [ ] Link entities to source document chunks
+- [ ] Show source attribution in Q&A responses
+- [ ] Enable chunk-level retrieval
+- [ ] Add graph community detection
+- [ ] Display document sources in UI
+- [ ] Test cross-document relationships with attribution
 
 ## Contingency Plans
 

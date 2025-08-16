@@ -1,13 +1,16 @@
 # CLAUDE.md - Project Guidelines for Knowledge Graph Builder
 
 ## Project Context
-Building a Universal Knowledge-Graph Builder for a 2-hour hackathon using Anthropic Claude API with LangChain.
+Universal Knowledge-Graph Builder using Anthropic Claude API with LlamaIndex for document-aware knowledge graphs with source attribution.
 
 ## API Configuration
 
 ### Required Environment Variables
 ```bash
 ANTHROPIC_API_KEY=your_api_key_here
+NEO4J_URI=neo4j+s://your-instance.databases.neo4j.io
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=your_password
 ```
 
 ### Model Selection
@@ -23,22 +26,27 @@ ANTHROPIC_API_KEY=your_api_key_here
 ### Import Organization
 ```python
 # Standard library
-import json
 import os
-from typing import List, Dict, Any
+import json
+import tempfile
+import asyncio
+import nest_asyncio
+from pathlib import Path
+from typing import List, Optional
 
 # Third-party
 import streamlit as st
 import networkx as nx
 from pyvis.network import Network
-from langchain_anthropic import ChatAnthropic
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
-from langchain.document_loaders import TextLoader, WebBaseLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+import pandas as pd
+from dotenv import load_dotenv
 
-# Local
-from components import graph_extractor
+# LlamaIndex imports
+from llama_index.core import Document, PropertyGraphIndex, Settings
+from llama_index.core.indices.property_graph import SimpleLLMPathExtractor
+from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
+from llama_index.llms.anthropic import Anthropic
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 ```
 
 ### Error Handling Pattern
@@ -56,18 +64,87 @@ def safe_extract(text: str) -> Dict:
 ### Streamlit Session State
 ```python
 # Initialize once
-if 'graph' not in st.session_state:
-    st.session_state.graph = nx.DiGraph()
-    st.session_state.processed_docs = []
-    st.session_state.extraction_cache = {}
+if 'index' not in st.session_state:
+    st.session_state.index = None
+    st.session_state.documents = []
+    st.session_state.graph_store = None
+    st.session_state.query_engine = None
+    st.session_state.existing_data_loaded = False
+```
+
+## LlamaIndex Patterns
+
+### Initialization with Async Support
+```python
+@st.cache_resource
+def init_llama_index():
+    # Fix asyncio event loop issue for Streamlit
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            asyncio.set_event_loop(asyncio.new_event_loop())
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+    
+    # Apply nest_asyncio to allow nested event loops
+    nest_asyncio.apply()
+    
+    # Initialize LLM and embedding models
+    llm = Anthropic(api_key=api_key, model="claude-3-haiku-20240307", temperature=0.1)
+    embed_model = HuggingFaceEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    
+    Settings.llm = llm
+    Settings.embed_model = embed_model
+    
+    # Initialize Neo4j store
+    graph_store = Neo4jPropertyGraphStore(url=neo4j_uri, username=neo4j_user, password=neo4j_password)
+    return llm, embed_model, graph_store
+```
+
+### Document Processing
+```python
+def process_document(content: str, source_name: str, index: Optional[PropertyGraphIndex] = None):
+    document = Document(text=content, metadata={"source": source_name, "filename": source_name})
+    
+    llm, embed_model, graph_store = init_llama_index()
+    kg_extractor = SimpleLLMPathExtractor(llm=llm, max_paths_per_chunk=10, num_workers=4)
+    
+    if index is None:
+        index = PropertyGraphIndex.from_documents(
+            [document], property_graph_store=graph_store, kg_extractors=[kg_extractor]
+        )
+    else:
+        index.insert_documents([document])
+    
+    return index
+```
+
+### Loading Existing Data
+```python
+def load_existing_data_from_neo4j():
+    if st.session_state.existing_data_loaded:
+        return
+    
+    llm, embed_model, graph_store = init_llama_index()
+    
+    if graph_store:
+        triplets = graph_store.get_triplets()
+        if triplets and len(triplets) > 0:
+            st.session_state.index = PropertyGraphIndex(nodes=[], property_graph_store=graph_store)
+            st.session_state.query_engine = st.session_state.index.as_query_engine(
+                include_text=True, response_mode="tree_summarize"
+            )
+            st.success(f"✅ Loaded {len(triplets)} relationships from Neo4j")
+    
+    st.session_state.existing_data_loaded = True
 ```
 
 ## Performance Guidelines
 
 ### Caching Strategy
-1. Cache LLM responses by text hash
-2. Store processed documents in session state
-3. Reuse graph object across reruns
+1. Cache LlamaIndex components with @st.cache_resource
+2. Store PropertyGraphIndex in session state
+3. Reuse graph store connections across reruns
 
 ### Batch Processing
 ```python
@@ -79,9 +156,30 @@ for i in range(0, len(chunks), BATCH_SIZE):
 ```
 
 ### Graph Size Limits
-- Max 500 nodes for visualization
-- Max 1000 edges
-- Implement pagination for larger graphs
+- Max 50 triplets for visualization (performance)
+- Limit to first 100 relationships in raw data tab
+- Auto-truncate long entity names in visualization
+
+### Graph Visualization with LlamaIndex
+```python
+def create_pyvis_graph(index: PropertyGraphIndex) -> str:
+    property_graph = index.property_graph_store
+    triplets = property_graph.get_triplets()
+    
+    # LlamaIndex triplets are [EntityNode, Relation, EntityNode]
+    for triplet in triplets[:50]:  # Limit for performance
+        subj_node, rel_node, obj_node = triplet
+        
+        # Extract names/IDs from nodes
+        subj = subj_node.name if hasattr(subj_node, 'name') else subj_node.id
+        obj = obj_node.name if hasattr(obj_node, 'name') else obj_node.id
+        rel = rel_node.label if hasattr(rel_node, 'label') else str(rel_node)
+        
+        # Add nodes and edges to Pyvis network
+        net.add_node(subj, label=subj[:20])
+        net.add_node(obj, label=obj[:20])
+        net.add_edge(subj, obj, label=rel[:15])
+```
 
 ## Quick Command Reference
 
@@ -140,41 +238,54 @@ If the answer is not in the graph, say "Information not found in the knowledge g
 
 ## Common Issues & Solutions
 
-### Issue: Slow Processing
-**Solution**: Reduce chunk size, use Haiku model, implement caching
-
-### Issue: Malformed JSON from LLM
-**Solution**: 
+### Issue: Neo4j Connection Failed - Event Loop Error
+**Solution**: Fix asyncio event loop for Streamlit
 ```python
-import re
-def extract_json(text):
-    # Find JSON block
-    match = re.search(r'\{.*\}', text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group())
-        except:
-            return {"entities": [], "relationships": []}
+# Add to initialization
+try:
+    loop = asyncio.get_event_loop()
+    if loop.is_closed():
+        asyncio.set_event_loop(asyncio.new_event_loop())
+except RuntimeError:
+    asyncio.set_event_loop(asyncio.new_event_loop())
+
+nest_asyncio.apply()
+```
+
+### Issue: Graph Visualization Shows "No data"
+**Solution**: Check triplet format handling
+```python
+# LlamaIndex triplets need proper extraction
+for triplet in triplets:
+    if isinstance(triplet, (list, tuple)) and len(triplet) == 3:
+        subj_node, rel_node, obj_node = triplet
+        subj = subj_node.name if hasattr(subj_node, 'name') else subj_node.id
+        # Continue processing...
+```
+
+### Issue: Embedding Model Not Found
+**Solution**: Set explicit embedding model
+```python
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+Settings.embed_model = HuggingFaceEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
+```
+
+### Issue: Slow Processing
+**Solution**: Reduce max_paths_per_chunk and use fewer workers
+```python
+kg_extractor = SimpleLLMPathExtractor(
+    llm=llm,
+    max_paths_per_chunk=5,  # Reduce from 10
+    num_workers=1          # Reduce from 4
+)
 ```
 
 ### Issue: Graph Too Large to Visualize
-**Solution**: Filter by centrality
+**Solution**: Limit triplets in visualization
 ```python
-# Show only top 100 nodes by degree
-top_nodes = sorted(G.degree(), key=lambda x: x[1], reverse=True)[:100]
-subgraph = G.subgraph([n for n, d in top_nodes])
-```
-
-### Issue: Duplicate Entities
-**Solution**: Simple deduplication
-```python
-def dedupe_entities(entities):
-    seen = {}
-    for e in entities:
-        key = e['name'].lower().strip()
-        if key not in seen or len(e.get('description', '')) > len(seen[key].get('description', '')):
-            seen[key] = e
-    return list(seen.values())
+# Show only first 50 triplets for performance
+for triplet in triplets[:50]:
+    # Process visualization
 ```
 
 ## Time-Saving Shortcuts

@@ -5,10 +5,11 @@ A Streamlit application that converts documents into interactive knowledge graph
 ## Features
 
 - **Document Ingestion**: Upload TXT files or fetch content from URLs
-- **Entity & Relationship Extraction**: Uses Claude API to intelligently extract entities and their relationships
+- **Entity & Relationship Extraction**: Uses Claude API via LlamaIndex to intelligently extract entities and their relationships
+- **Document Indexing**: Maintains links between entities and source document chunks
 - **Interactive Visualization**: Dynamic, physics-enabled graph visualization with Pyvis
-- **Natural Language Q&A**: Ask questions about the knowledge graph and get contextual answers
-- **Persistent Storage**: Automatic saving to Neo4j database (if configured)
+- **Natural Language Q&A**: Ask questions with source attribution showing exact document passages
+- **Persistent Storage**: Automatic saving to Neo4j database with full graph capabilities
 - **Cross-Document Relationships**: Discovers connections between entities across multiple documents
 - **Export Functionality**: Download your knowledge graph as JSON
 
@@ -61,6 +62,17 @@ streamlit run app.py
 
 The app will open in your browser at `http://localhost:8501`
 
+### Current Implementation (LlamaIndex-based)
+
+The app now uses LlamaIndex for enhanced knowledge graph capabilities:
+
+- **Document Indexing**: PropertyGraphIndex maintains links between entities and source chunks
+- **Source Attribution**: Every answer includes the exact document passages used
+- **Better Extraction**: LlamaIndex's SimpleLLMPathExtractor for consistent results
+- **Unified Framework**: Single index manages documents, graph, and retrieval
+- **Auto-Loading**: Automatically loads existing data from Neo4j on startup
+- **Async Support**: Fixed event loop issues for proper Neo4j integration
+
 ## Usage
 
 1. **Input Document**:
@@ -84,28 +96,35 @@ The app will open in your browser at `http://localhost:8501`
 
 ```
 grag/
-├── app.py                    # Main Streamlit application
-├── components/
-│   ├── document_processor.py # Document ingestion & chunking
-│   ├── graph_extractor.py    # Entity/relationship extraction
-│   ├── graph_builder.py      # NetworkX graph construction
-│   ├── visualizer.py         # Pyvis visualization
-│   └── qa_engine.py          # Q&A functionality
+├── app.py                    # Main LlamaIndex-based application
+├── app_old.py                # Original NetworkX-based implementation (backup)
+├── components/               # Original components (used by app_old.py)
+│   ├── document_processor.py
+│   ├── graph_extractor.py
+│   ├── graph_builder.py
+│   ├── visualizer.py
+│   ├── qa_engine.py
+│   └── neo4j_manager.py
 ├── sample_docs/              # Sample documents for testing
+│   ├── technology_history.txt
+│   ├── steve_jobs_biography.txt
+│   └── silicon_valley_companies.txt
+├── neo4j_utils.py           # Neo4j management utilities
+├── clear_neo4j.py           # Script to clear Neo4j database
 ├── .env                      # API keys (not in repo)
-├── pyproject.toml           # Project configuration
+├── requirements.txt          # Python dependencies
 └── README.md                # This file
 ```
 
 ## Technology Stack
 
 - **LLM**: Anthropic Claude 3 Haiku
-- **Framework**: LangChain for LLM orchestration
+- **Graph Framework**: LlamaIndex PropertyGraphIndex for document-aware knowledge graphs
 - **UI**: Streamlit
-- **Graph Processing**: NetworkX
-- **Graph Database**: Neo4j (optional, for persistence)
+- **Graph Processing**: NetworkX + LlamaIndex
+- **Graph Database**: Neo4j with Neo4jPropertyGraphStore
 - **Visualization**: Pyvis
-- **Document Processing**: BeautifulSoup4, LangChain text splitters
+- **Document Processing**: LlamaIndex document loaders and text splitters
 
 ## Sample Questions
 

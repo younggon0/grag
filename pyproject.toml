@@ -5,8 +5,10 @@ description = "Universal Knowledge-Graph Builder with NL Q&A"
 requires-python = ">=3.10,<3.12"
 dependencies = [
     "streamlit>=1.29.0",
-    "langchain>=0.1.0",
-    "langchain-anthropic>=0.1.1",
+    "llama-index-core>=0.10.0",
+    "llama-index-llms-anthropic>=0.1.0",
+    "llama-index-graph-stores-neo4j>=0.1.0",
+    "llama-index-embeddings-huggingface>=0.1.0",
     "networkx>=3.2.1",
     "pyvis>=0.3.2",
     "python-dotenv>=1.0.0",
