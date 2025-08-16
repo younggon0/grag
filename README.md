@@ -1,17 +1,19 @@
 # 🧠 Universal Knowledge Graph Builder
 
-A Streamlit application that converts documents into interactive knowledge graphs with natural language Q&A capabilities.
+A robust Streamlit application that converts documents into interactive knowledge graphs with natural language Q&A capabilities, powered by Claude AI and LlamaIndex.
 
 ## Features
 
-- **Document Ingestion**: Upload TXT files or fetch content from URLs
+- **Document Ingestion**: Upload TXT files, enter text directly, or use sample documents
 - **Entity & Relationship Extraction**: Uses Claude API via LlamaIndex to intelligently extract entities and their relationships
-- **Document Indexing**: Maintains links between entities and source document chunks
-- **Interactive Visualization**: Dynamic, physics-enabled graph visualization with Pyvis
+- **Document Indexing**: Maintains links between entities and source document chunks with full attribution
+- **Interactive Visualization**: Dynamic, physics-enabled graph visualization with Pyvis (optimized for performance)
 - **Natural Language Q&A**: Ask questions with source attribution showing exact document passages
-- **Persistent Storage**: Automatic saving to Neo4j database with full graph capabilities
+- **Persistent Storage**: Automatic saving to Neo4j database with full graph capabilities and error recovery
 - **Cross-Document Relationships**: Discovers connections between entities across multiple documents
 - **Export Functionality**: Download your knowledge graph as JSON
+- **Error Recovery**: Robust handling of connection issues, data conflicts, and processing errors
+- **Performance Optimizations**: Improved duplicate detection, memory management, and visualization limits
 
 ## Quick Start
 
@@ -126,6 +128,22 @@ grag/
 - **Visualization**: Pyvis
 - **Document Processing**: LlamaIndex document loaders and text splitters
 
+## Recent Improvements (v2.1)
+
+### Critical Bug Fixes
+- **Data Loss Prevention**: Fixed issue where new documents could overwrite existing graph data
+- **Security**: Improved API key handling and secure temporary file management
+- **Stability**: Enhanced error recovery for Neo4j connection failures
+- **Memory Management**: Proper cleanup of temporary files and resources
+- **Duplicate Prevention**: Automatic detection and prevention of duplicate graph edges
+- **UI Improvements**: Fixed spinner display issues and improved status indicators
+
+### Performance Enhancements
+- Optimized graph visualization (limited to 50 triplets for smooth rendering)
+- Improved document chunking strategy
+- Better caching mechanisms
+- Reduced memory footprint
+
 ## Sample Questions
 
 Once you've built a knowledge graph, try asking:
@@ -190,10 +208,12 @@ python neo4j_utils.py clear
 ## Performance Tips
 
 - For large documents, the app automatically chunks text for processing
-- Graph visualization is limited to 500 nodes for performance
+- Graph visualization is limited to 50 triplets for optimal performance
 - Use the physics toggle to improve rendering of large graphs
 - Enable caching by not modifying already processed documents
 - Neo4j connection provides faster loading for large graphs
+- Duplicate relationships are automatically detected and prevented
+- Memory usage optimized through proper cleanup of temporary files
 
 ## Troubleshooting
 
@@ -203,11 +223,21 @@ python neo4j_utils.py clear
 **Graph not displaying**:
 - Try refreshing the view with the refresh button
 - Toggle physics on/off
-- For very large graphs, the app automatically shows top nodes by connectivity
+- For very large graphs, the app automatically limits to 50 triplets for performance
 
 **Slow processing**:
 - Large documents are chunked and processed in batches
 - First-time processing is slower; subsequent runs use cached extractions
+- Reduce `max_paths_per_chunk` in SimpleLLMPathExtractor for faster processing
+
+**Neo4j connection issues**:
+- Check your Neo4j credentials in `.env`
+- Ensure your Neo4j instance is running
+- The app will gracefully fall back to in-memory storage if Neo4j is unavailable
+
+**Duplicate relationships**:
+- The app now automatically detects and prevents duplicate relationships
+- Existing duplicates can be cleaned using the neo4j_utils.py script
 
 ## Deployment on Streamlit Cloud
 

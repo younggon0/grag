@@ -63,13 +63,17 @@ def safe_extract(text: str) -> Dict:
 
 ### Streamlit Session State
 ```python
-# Initialize once
+# Initialize once with all required fields
 if 'index' not in st.session_state:
     st.session_state.index = None
     st.session_state.documents = []
     st.session_state.graph_store = None
     st.session_state.query_engine = None
     st.session_state.existing_data_loaded = False
+    st.session_state.current_content = None
+    st.session_state.current_source = None
+    st.session_state.neo4j_status = 'unknown'
+    st.session_state.neo4j_message = 'Initializing...'
 ```
 
 ## LlamaIndex Patterns
@@ -145,6 +149,7 @@ def load_existing_data_from_neo4j():
 1. Cache LlamaIndex components with @st.cache_resource
 2. Store PropertyGraphIndex in session state
 3. Reuse graph store connections across reruns
+4. Implement connection status tracking in session state
 
 ### Batch Processing
 ```python
@@ -242,14 +247,17 @@ If the answer is not in the graph, say "Information not found in the knowledge g
 **Solution**: Fix asyncio event loop for Streamlit
 ```python
 # Add to initialization
-try:
-    loop = asyncio.get_event_loop()
-    if loop.is_closed():
+def setup_event_loop():
+    """Setup asyncio event loop for Streamlit compatibility"""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            asyncio.set_event_loop(asyncio.new_event_loop())
+    except RuntimeError:
         asyncio.set_event_loop(asyncio.new_event_loop())
-except RuntimeError:
-    asyncio.set_event_loop(asyncio.new_event_loop())
-
-nest_asyncio.apply()
+    
+    # Apply nest_asyncio to allow nested event loops
+    nest_asyncio.apply()
 ```
 
 ### Issue: Graph Visualization Shows "No data"
@@ -286,6 +294,52 @@ kg_extractor = SimpleLLMPathExtractor(
 # Show only first 50 triplets for performance
 for triplet in triplets[:50]:
     # Process visualization
+```
+
+### Issue: Data Loss When Adding New Documents
+**Solution**: Always append to existing index, never overwrite
+```python
+def process_document(content: str, source_name: str, index: Optional[PropertyGraphIndex] = None):
+    # CRITICAL: Check if index exists before creating new one
+    if index is None:
+        index = PropertyGraphIndex.from_documents([document], ...)
+    else:
+        # Append to existing index
+        index.insert_documents([document])
+    return index
+```
+
+### Issue: Duplicate Relationships in Graph
+**Solution**: Check for duplicates before adding
+```python
+def add_relationship_safe(graph_store, subject, predicate, object):
+    # Check if relationship already exists
+    existing = graph_store.get_triplets(subject_id=subject.id)
+    for triplet in existing:
+        if (triplet[1].label == predicate and 
+            triplet[2].id == object.id):
+            return  # Skip duplicate
+    # Add new relationship
+    graph_store.add_triplet(subject, predicate, object)
+```
+
+### Issue: Memory Leaks with Temporary Files
+**Solution**: Always clean up temp files with try/finally
+```python
+tmp_path = None
+try:
+    # Create and use temp file
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as tmp:
+        tmp_path = tmp.name
+        tmp.write(content)
+    # Process file
+finally:
+    # Always clean up
+    if tmp_path and os.path.exists(tmp_path):
+        try:
+            os.unlink(tmp_path)
+        except OSError as e:
+            logger.warning(f"Failed to delete temp file: {e}")
 ```
 
 ## Time-Saving Shortcuts
@@ -332,14 +386,77 @@ def debug_print(msg):
         st.sidebar.write(f"🔍 {msg}")
 ```
 
+### Structured Logging
+```python
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('knowledge_graph_builder.log')
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Use structured logging
+logger.info(f"Processing document: {source_name}")
+logger.error(f"Neo4j connection failed: {str(e)}")
+logger.warning(f"Large graph detected: {len(triplets)} relationships")
+```
+
 ### Common Debug Points
 1. After document loading - check chunk count
 2. After extraction - verify JSON structure
 3. After graph building - check node/edge count
 4. Before visualization - verify graph connectivity
 
+## Security Best Practices
+
+### API Key Management
+```python
+# Never hardcode API keys
+api_key = os.getenv('ANTHROPIC_API_KEY')
+if not api_key:
+    st.error("⚠️ Please set your ANTHROPIC_API_KEY in the .env file")
+    st.stop()
+
+# Validate API key format (optional)
+if not api_key.startswith('sk-ant-'):
+    st.error("Invalid API key format")
+    st.stop()
+```
+
+### Secure File Handling
+```python
+# Validate file uploads
+MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+if uploaded_file.size > MAX_FILE_SIZE:
+    st.error("File too large! Maximum size is 100MB")
+    return
+
+# Sanitize filenames
+import re
+safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
+```
+
+### Database Connection Security
+```python
+# Use environment variables for credentials
+neo4j_uri = os.getenv('NEO4J_URI')
+neo4j_user = os.getenv('NEO4J_USERNAME')
+neo4j_password = os.getenv('NEO4J_PASSWORD')
+
+# Validate connection parameters
+if neo4j_uri and not neo4j_uri.startswith(('neo4j://', 'neo4j+s://', 'bolt://')):
+    logger.error("Invalid Neo4j URI format")
+    return None
+```
+
 ## Final Checklist
-- [ ] API key in .env file
+- [ ] API key in .env file (never commit .env)
 - [ ] All imports at top of files
 - [ ] Error handling for all external calls
 - [ ] Progress indicators for long operations
@@ -347,6 +464,8 @@ def debug_print(msg):
 - [ ] Clean session state management
 - [ ] Graph size limits enforced
 - [ ] Proper JSON validation
+- [ ] Secure temp file cleanup
+- [ ] Input validation for all user data
 
 ## Emergency Fallbacks
 
