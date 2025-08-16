@@ -44,6 +44,8 @@ if 'index' not in st.session_state:
     st.session_state.graph_store = None
     st.session_state.query_engine = None
     st.session_state.existing_data_loaded = False
+    st.session_state.current_content = None
+    st.session_state.current_source = None
 
 @st.cache_resource
 def init_llama_index():
@@ -139,6 +141,17 @@ def load_existing_data_from_neo4j():
                     verbose=True
                 )
                 
+                # Try to populate documents list from existing data
+                try:
+                    query = "MATCH (n) WHERE n.source IS NOT NULL RETURN DISTINCT n.source AS source"
+                    result = graph_store.structured_query(query)
+                    if result:
+                        existing_sources = [row['source'] for row in result]
+                        st.session_state.documents.extend(existing_sources)
+                        st.session_state.documents = list(set(st.session_state.documents))  # Remove duplicates
+                except:
+                    pass
+                
                 st.session_state.existing_data_loaded = True
                 st.success(f"✅ Loaded existing knowledge graph with {len(triplets)} relationships from Neo4j")
                 
@@ -180,9 +193,20 @@ def process_document(content: str, source_name: str, index: Optional[PropertyGra
                 show_progress=True
             )
     else:
-        # Add to existing index
+        # Add to existing index using the insert method
         with st.spinner("🔍 Adding to knowledge graph..."):
-            index.insert_documents([document])
+            try:
+                # Use the insert method to add a single document
+                index.insert(document)
+            except Exception as e:
+                st.error(f"Error adding document to existing index: {str(e)}")
+                # Fallback: create new index
+                index = PropertyGraphIndex.from_documents(
+                    [document],
+                    property_graph_store=graph_store,
+                    kg_extractors=[kg_extractor],
+                    show_progress=True
+                )
     
     return index
 
@@ -359,10 +383,13 @@ def main():
             ["Upload File", "Use Sample", "Enter Text"]
         )
         
-        content = None
-        source_name = None
-        
+        # Reset content/source if input method changes
         if input_method == "Upload File":
+            # Clear any previous content from other methods
+            if st.session_state.current_source and not st.session_state.current_source.endswith('.txt'):
+                st.session_state.current_content = None
+                st.session_state.current_source = None
+                
             uploaded_file = st.file_uploader(
                 "Choose a text file",
                 type=['txt'],
@@ -373,8 +400,8 @@ def main():
                 if uploaded_file.size > 100 * 1024 * 1024:
                     st.error("File too large! Please upload a file smaller than 100MB.")
                 else:
-                    content = uploaded_file.read().decode('utf-8')
-                    source_name = uploaded_file.name
+                    st.session_state.current_content = uploaded_file.read().decode('utf-8')
+                    st.session_state.current_source = uploaded_file.name
         
         elif input_method == "Use Sample":
             sample_docs = {
@@ -388,11 +415,27 @@ def main():
             if st.button("Load Sample"):
                 sample_path = Path(sample_docs[selected_sample])
                 if sample_path.exists():
-                    with open(sample_path, 'r') as f:
-                        content = f.read()
-                    source_name = selected_sample
+                    try:
+                        with open(sample_path, 'r') as f:
+                            st.session_state.current_content = f.read()
+                        st.session_state.current_source = selected_sample
+                        st.success(f"✅ Loaded sample: {selected_sample}")
+                    except Exception as e:
+                        st.error(f"Error reading sample file: {str(e)}")
+                        # Fallback to built-in sample
+                        st.session_state.current_content = """Apple Inc. is an American multinational technology company headquartered in Cupertino, California. It was founded by Steve Jobs, Steve Wozniak, and Ronald Wayne in April 1976 to develop and sell personal computers. The company was incorporated as Apple Computer, Inc. in January 1977, and sales of its computers saw significant momentum and revenue growth. Steve Jobs resigned from Apple in 1985 and founded NeXT, a computer platform development company. Apple acquired NeXT in 1997, and Jobs returned to Apple as CEO. Under his leadership, Apple introduced revolutionary products like the iMac, iPod, iPhone, and iPad. Tim Cook became CEO in August 2011 after Jobs resigned due to health issues."""
+                        st.session_state.current_source = "fallback_sample.txt"
+                        st.success("✅ Loaded fallback sample content")
                 else:
                     st.error(f"Sample file not found: {sample_path}")
+                    # Fallback to built-in sample
+                    st.session_state.current_content = """Apple Inc. is an American multinational technology company headquartered in Cupertino, California. It was founded by Steve Jobs, Steve Wozniak, and Ronald Wayne in April 1976 to develop and sell personal computers. The company was incorporated as Apple Computer, Inc. in January 1977, and sales of its computers saw significant momentum and revenue growth. Steve Jobs resigned from Apple in 1985 and founded NeXT, a computer platform development company. Apple acquired NeXT in 1997, and Jobs returned to Apple as CEO. Under his leadership, Apple introduced revolutionary products like the iMac, iPod, iPhone, and iPad. Tim Cook became CEO in August 2011 after Jobs resigned due to health issues."""
+                    st.session_state.current_source = "fallback_sample.txt"
+                    st.success("✅ Loaded fallback sample content")
+            
+            # Show current loaded sample
+            if st.session_state.current_content and st.session_state.current_source:
+                st.info(f"📄 Ready to process: {st.session_state.current_source}")
         
         else:  # Enter Text
             text_input = st.text_area(
@@ -401,8 +444,12 @@ def main():
                 help="Paste or type your text here"
             )
             if text_input:
-                content = text_input
-                source_name = "manual_input.txt"
+                st.session_state.current_content = text_input
+                st.session_state.current_source = "manual_input.txt"
+        
+        # Get content and source from session state
+        content = st.session_state.current_content
+        source_name = st.session_state.current_source
         
         # Process button
         if content and st.button("🚀 Build Knowledge Graph", type="primary"):
@@ -413,6 +460,10 @@ def main():
                     st.session_state.index
                 )
                 
+                # Track processed documents
+                if source_name not in st.session_state.documents:
+                    st.session_state.documents.append(source_name)
+                
                 # Create query engine
                 st.session_state.query_engine = st.session_state.index.as_query_engine(
                     include_text=True,
@@ -421,6 +472,11 @@ def main():
                 )
                 
                 st.success(f"✅ Successfully processed: {source_name}")
+                
+                # Clear the current content to avoid reprocessing
+                st.session_state.current_content = None
+                st.session_state.current_source = None
+                
                 st.balloons()
         
         # Graph statistics
@@ -436,7 +492,28 @@ def main():
                 except:
                     st.metric("Graph Store", "Active")
             
-            st.metric("Documents Processed", len(st.session_state.documents) if hasattr(st.session_state, 'documents') else 1)
+            # Try to get document count from Neo4j or session state
+            doc_count = len(st.session_state.documents) if st.session_state.documents else 0
+            
+            # If we have a graph store, try to get unique document sources
+            if graph_store and doc_count == 0:
+                try:
+                    # Query for unique document sources in Neo4j
+                    query = "MATCH (n) WHERE n.source IS NOT NULL RETURN DISTINCT n.source AS source"
+                    result = graph_store.structured_query(query)
+                    if result:
+                        doc_count = len(result)
+                except:
+                    # Fallback: estimate from triplets
+                    try:
+                        triplets = graph_store.get_triplets()
+                        if triplets:
+                            # Estimate: if we have triplets, we probably have at least 1 document
+                            doc_count = max(1, len(triplets) // 10)  # rough estimate
+                    except:
+                        doc_count = 0
+            
+            st.metric("Documents Processed", doc_count)
         
         # Clear graph option
         if st.session_state.index:
