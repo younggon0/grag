@@ -1,0 +1,15 @@
+The History of Modern Technology Companies
+
+Apple Inc. was founded by Steve Jobs, Steve Wozniak, and Ronald Wayne on April 1, 1976, in Los Altos, California. The company initially focused on developing and selling personal computers. Steve Jobs, who served as CEO, was known for his innovative vision and attention to design. After leaving Apple in 1985, Jobs founded NeXT Computer, which Apple later acquired in 1997, bringing Jobs back to the company.
+
+Microsoft Corporation was founded by Bill Gates and Paul Allen on April 4, 1975, in Albuquerque, New Mexico. The company's breakthrough came with MS-DOS, an operating system for IBM personal computers. Bill Gates served as CEO until 2000, when Steve Ballmer took over. Under Gates' leadership, Microsoft Windows became the dominant desktop operating system worldwide. Satya Nadella became CEO in 2014 and has focused on cloud computing with Microsoft Azure.
+
+Google was founded by Larry Page and Sergey Brin in September 1998 while they were PhD students at Stanford University. The company started in a garage in Menlo Park, California. Google's PageRank algorithm revolutionized internet search. In 2015, Google restructured under a new holding company called Alphabet Inc., with Sundar Pichai becoming CEO of Google.
+
+Amazon was founded by Jeff Bezos in July 1994 as an online bookstore operating out of Bezos' garage in Bellevue, Washington. The company quickly expanded beyond books to become "The Everything Store." Amazon Web Services (AWS), launched in 2006, became a major player in cloud computing. Andy Jassy, who led AWS, became CEO in 2021 when Bezos stepped down.
+
+Facebook, now known as Meta Platforms, was founded by Mark Zuckerberg along with fellow Harvard students Eduardo Saverin, Andrew McCollum, Dustin Moskovitz, and Chris Hughes in February 2004. Initially limited to Harvard students, Facebook expanded rapidly to other universities and then to the general public. The company acquired Instagram in 2012 and WhatsApp in 2014.
+
+Tesla Inc. was founded in 2003 by Martin Eberhard and Marc Tarpenning. Elon Musk joined the company in 2004 as chairman of the board after leading a Series A funding round. Musk became CEO in 2008 and has driven the company's mission to accelerate sustainable transport. Tesla's Gigafactory in Nevada, opened in 2016, produces batteries for electric vehicles.
+
+These technology companies have revolutionized various industries including personal computing, software, internet services, e-commerce, social media, and electric vehicles. They are headquartered primarily in Silicon Valley and the Seattle area, forming major technology hubs in the United States.
