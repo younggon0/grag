@@ -8,14 +8,17 @@ A Streamlit application that converts documents into interactive knowledge graph
 - **Entity & Relationship Extraction**: Uses Claude API to intelligently extract entities and their relationships
 - **Interactive Visualization**: Dynamic, physics-enabled graph visualization with Pyvis
 - **Natural Language Q&A**: Ask questions about the knowledge graph and get contextual answers
+- **Persistent Storage**: Automatic saving to Neo4j database (if configured)
+- **Cross-Document Relationships**: Discovers connections between entities across multiple documents
 - **Export Functionality**: Download your knowledge graph as JSON
 
 ## Quick Start
 
 ### Prerequisites
 
-- Python 3.9+
+- Python 3.10+
 - Anthropic API key
+- Neo4j database (optional, for persistent storage)
 
 ### Installation
 
@@ -39,9 +42,16 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-3. Set up your API key:
-   - Open `.env` file
-   - Replace `your_api_key_here` with your actual Anthropic API key
+3. Set up your API keys:
+   - Copy `.env.example` to `.env`
+   - Add your Anthropic API key
+   - (Optional) Add Neo4j credentials for persistent storage:
+   ```bash
+   ANTHROPIC_API_KEY=your_anthropic_key
+   NEO4J_URI=neo4j+s://your-instance.databases.neo4j.io
+   NEO4J_USERNAME=neo4j
+   NEO4J_PASSWORD=your_password
+   ```
 
 ### Running the App
 
@@ -93,6 +103,7 @@ grag/
 - **Framework**: LangChain for LLM orchestration
 - **UI**: Streamlit
 - **Graph Processing**: NetworkX
+- **Graph Database**: Neo4j (optional, for persistence)
 - **Visualization**: Pyvis
 - **Document Processing**: BeautifulSoup4, LangChain text splitters
 
@@ -105,12 +116,65 @@ Once you've built a knowledge graph, try asking:
 - "How many entities are in the graph?"
 - "List all people mentioned"
 
+## Persistent Storage with Neo4j
+
+The app supports Neo4j for persistent graph storage:
+
+- **Automatic Loading**: Graph loads from Neo4j on app startup
+- **Auto-Save**: Every processed document is automatically saved to Neo4j
+- **Cross-Session Persistence**: Your graph persists across browser refreshes and sessions
+- **Multi-Document Relationships**: Build connections between entities across multiple documents
+
+### Setting up Neo4j
+
+1. **Neo4j AuraDB (Free Tier)**:
+   - Sign up at [neo4j.com/aura](https://neo4j.com/aura)
+   - Create a free instance
+   - Copy credentials to `.env` file
+
+2. **Local Neo4j**:
+   - Download Neo4j Desktop
+   - Create local database
+   - Use `neo4j://localhost:7687` as URI
+
+### Neo4j Utilities
+
+The project includes utility scripts for managing your Neo4j database:
+
+#### Clear Database
+```bash
+python clear_neo4j.py
+```
+Safely clears all data from Neo4j with confirmation prompt.
+
+#### Database Management
+```bash
+# Show database statistics
+python neo4j_utils.py stats
+
+# Search for entities
+python neo4j_utils.py search --query "Steve Jobs"
+
+# Get entity details
+python neo4j_utils.py details --query "Apple Inc."
+
+# Export graph to JSON
+python neo4j_utils.py export --output my_graph.json
+
+# List recent entities
+python neo4j_utils.py recent --limit 10
+
+# Clear database (with confirmation)
+python neo4j_utils.py clear
+```
+
 ## Performance Tips
 
 - For large documents, the app automatically chunks text for processing
 - Graph visualization is limited to 500 nodes for performance
 - Use the physics toggle to improve rendering of large graphs
 - Enable caching by not modifying already processed documents
+- Neo4j connection provides faster loading for large graphs
 
 ## Troubleshooting
 

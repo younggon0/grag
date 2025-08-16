@@ -17,6 +17,7 @@ from components.graph_extractor import GraphExtractor
 from components.graph_builder import GraphBuilder
 from components.visualizer import GraphVisualizer
 from components.qa_engine import QAEngine
+from components.neo4j_manager import Neo4jManager
 
 # Load environment variables
 load_dotenv()
@@ -29,14 +30,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Initialize session state
-if 'graph' not in st.session_state:
-    st.session_state.graph = nx.DiGraph()
-    st.session_state.processed_docs = []
-    st.session_state.extraction_cache = {}
-    st.session_state.entities = []
-    st.session_state.relationships = []
-
 # Initialize components
 @st.cache_resource
 def init_components():
@@ -46,13 +39,38 @@ def init_components():
         st.error("⚠️ Please set your ANTHROPIC_API_KEY in the .env file")
         st.stop()
     
+    # Initialize Neo4j manager
+    neo4j_manager = Neo4jManager()
+    
     return {
         'processor': DocumentProcessor(),
         'extractor': GraphExtractor(api_key),
         'builder': GraphBuilder(),
         'visualizer': GraphVisualizer(),
-        'qa_engine': QAEngine(api_key)
+        'qa_engine': QAEngine(api_key),
+        'neo4j': neo4j_manager
     }
+
+# Initialize session state
+if 'graph' not in st.session_state:
+    st.session_state.graph = nx.DiGraph()
+    st.session_state.processed_docs = []
+    st.session_state.extraction_cache = {}
+    st.session_state.entities = []
+    st.session_state.relationships = []
+    
+    # Load from Neo4j if connected
+    components = init_components()
+    if components['neo4j'].connected:
+        st.info("🔄 Loading graph from Neo4j...")
+        data = components['neo4j'].load_from_neo4j()
+        st.session_state.entities = data['entities']
+        st.session_state.relationships = data['relationships']
+        
+        # Rebuild NetworkX graph from Neo4j data
+        if data['entities'] or data['relationships']:
+            st.session_state.graph = components['neo4j'].neo4j_to_networkx()
+            st.success(f"✅ Loaded {len(data['entities'])} entities and {len(data['relationships'])} relationships from Neo4j")
 
 # Main app
 def main():
@@ -64,6 +82,15 @@ def main():
     
     # Sidebar for input
     with st.sidebar:
+        # Neo4j connection status
+        if components['neo4j'].connected:
+            st.success("✅ Connected to Neo4j")
+            stats = components['neo4j'].get_statistics()
+            if stats['nodes'] > 0:
+                st.info(f"📊 Neo4j: {stats['nodes']} nodes, {stats['relationships']} relationships")
+        else:
+            st.warning("⚠️ Neo4j not connected - using in-memory graph only")
+        
         st.header("📁 Document Input")
         
         input_method = st.radio(
@@ -143,6 +170,20 @@ def main():
                     file_name="knowledge_graph.json",
                     mime="application/json"
                 )
+            
+            # Clear graph option
+            st.divider()
+            st.header("⚠️ Manage Graph")
+            if st.button("🗑️ Clear All Data", type="secondary"):
+                if components['neo4j'].connected:
+                    components['neo4j'].clear_graph()
+                st.session_state.graph = nx.DiGraph()
+                st.session_state.entities = []
+                st.session_state.relationships = []
+                st.session_state.processed_docs = []
+                st.session_state.extraction_cache = {}
+                st.success("Graph cleared successfully!")
+                st.rerun()
     
     # Main content area with tabs
     tab1, tab2, tab3 = st.tabs(["🌐 Graph Visualization", "❓ Q&A Interface", "📝 Entities & Relations"])
@@ -261,6 +302,11 @@ def process_document(content, source_name, components):
         st.session_state.entities.extend(all_entities)
         st.session_state.relationships.extend(all_relationships)
         st.session_state.processed_docs.append(source_name)
+        
+        # Save to Neo4j if connected
+        if components['neo4j'].connected:
+            status_text.text("💾 Saving to Neo4j...")
+            components['neo4j'].save_to_neo4j(all_entities, all_relationships)
         
         # Complete
         progress_bar.progress(100)
