@@ -2,7 +2,7 @@
 name = "knowledge-graph-builder"
 version = "0.1.0"
 description = "Universal Knowledge-Graph Builder with NL Q&A"
-requires-python = ">=3.9"
+requires-python = ">=3.10,<3.12"
 dependencies = [
     "streamlit>=1.29.0",
     "langchain>=0.1.0",
