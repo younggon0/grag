@@ -181,13 +181,33 @@ def load_existing_data_from_neo4j():
 def process_document(content: str, source_name: str, index: Optional[PropertyGraphIndex] = None):
     """Process a document and add to knowledge graph"""
     
+    # Determine source type and create appropriate metadata
+    from urllib.parse import urlparse
+    from datetime import datetime
+    
+    metadata = {
+        "source": source_name,
+        "filename": source_name
+    }
+    
+    # Add URL-specific metadata if source is a URL
+    if source_name.startswith(('http://', 'https://')):
+        parsed_url = urlparse(source_name)
+        metadata.update({
+            "source_type": "url",
+            "domain": parsed_url.netloc,
+            "fetch_date": datetime.now().isoformat(),
+            "url": source_name
+        })
+        # Use domain as filename for better display
+        metadata["filename"] = parsed_url.netloc
+    else:
+        metadata["source_type"] = "file"
+    
     # Create Document object
     document = Document(
         text=content,
-        metadata={
-            "source": source_name,
-            "filename": source_name
-        }
+        metadata=metadata
     )
     
     # Get components
@@ -454,7 +474,7 @@ def main():
         # Input method selection
         input_method = st.radio(
             "Choose input method:",
-            ["Upload File", "Use Sample", "Enter Text"]
+            ["Upload File", "Use Sample", "Enter Text", "Enter URL"]
         )
         
         # Reset content/source if input method changes
@@ -511,7 +531,7 @@ def main():
             if st.session_state.current_content and st.session_state.current_source:
                 st.info(f"📄 Ready to process: {st.session_state.current_source}")
         
-        else:  # Enter Text
+        elif input_method == "Enter Text":
             text_input = st.text_area(
                 "Enter text:",
                 height=200,
@@ -520,6 +540,56 @@ def main():
             if text_input:
                 st.session_state.current_content = text_input
                 st.session_state.current_source = "manual_input.txt"
+        
+        else:  # Enter URL
+            url_input = st.text_input(
+                "Enter URL:",
+                placeholder="https://example.com/article",
+                help="Enter a URL to fetch and process HTML content"
+            )
+            
+            if url_input and st.button("Fetch URL Content"):
+                # Validate URL format
+                import re
+                url_pattern = re.compile(r'^https?://[^\s]+$')
+                
+                if not url_pattern.match(url_input):
+                    st.error("⚠️ Please enter a valid URL starting with http:// or https://")
+                else:
+                    with st.spinner(f"🌐 Fetching content from {url_input}..."):
+                        try:
+                            # Import components here to avoid circular imports
+                            from components.document_processor import DocumentProcessor
+                            from urllib.parse import urlparse
+                            from datetime import datetime
+                            
+                            # Initialize document processor
+                            processor = DocumentProcessor()
+                            
+                            # Fetch and process URL content
+                            html_content = processor.fetch_url(url_input)
+                            
+                            if len(html_content) < 100:
+                                st.error("⚠️ Insufficient content extracted from URL. Please try a different URL.")
+                            elif len(html_content) > 100 * 1024 * 1024:  # 100MB limit
+                                st.error("⚠️ Content too large (>100MB). Please try a smaller page.")
+                            else:
+                                st.session_state.current_content = html_content
+                                st.session_state.current_source = url_input
+                                
+                                # Show preview of fetched content
+                                with st.expander("📄 Preview fetched content", expanded=False):
+                                    st.text(html_content[:500] + "..." if len(html_content) > 500 else html_content)
+                                
+                                st.success(f"✅ Successfully fetched {len(html_content):,} characters from URL")
+                                
+                        except Exception as e:
+                            st.error(f"❌ Error fetching URL: {str(e)}")
+                            logger.error(f"URL fetch error: {str(e)}")
+            
+            # Show current loaded URL
+            if st.session_state.current_content and st.session_state.current_source and st.session_state.current_source.startswith("http"):
+                st.info(f"🌐 Ready to process: {st.session_state.current_source}")
         
         # Get content and source from session state
         content = st.session_state.current_content
@@ -687,8 +757,7 @@ def main():
                         response = st.session_state.query_engine.query(question)
                         
                         # Display answer
-                        st.success("**Answer:**")
-                        st.write(response.response)
+                        st.success(f"**Answer:** {response.response}")
                         
                         # Display sources
                         if hasattr(response, 'source_nodes') and response.source_nodes:

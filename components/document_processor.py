@@ -26,34 +26,86 @@ class DocumentProcessor:
     
     def fetch_url(self, url: str) -> str:
         """
-        Fetch content from a URL
+        Fetch content from a URL with enhanced HTML extraction
         
         Args:
             url: URL to fetch
             
         Returns:
-            Text content from the URL
+            Text content from the URL with preserved structure
         """
         try:
-            response = requests.get(url, timeout=30)
+            # Set headers to appear as a browser
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            
+            response = requests.get(url, timeout=30, headers=headers)
             response.raise_for_status()
             
             # Parse HTML content
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Remove script and style elements
-            for script in soup(["script", "style"]):
-                script.decompose()
+            # Remove non-content elements
+            for element in soup(['script', 'style', 'nav', 'footer', 'aside', 'header', 'meta', 'link', 'noscript']):
+                element.decompose()
             
-            # Get text content
-            text = soup.get_text()
+            # Build structured text with better context preservation
+            text_parts = []
             
-            # Clean up text
-            lines = (line.strip() for line in text.splitlines())
-            chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-            text = ' '.join(chunk for chunk in chunks if chunk)
+            # Extract title
+            if soup.title and soup.title.string:
+                title = soup.title.string.strip()
+                if title:
+                    text_parts.append(f"Title: {title}\n")
             
-            return text
+            # Try to find main content area (common patterns)
+            main_content = (
+                soup.find('main') or 
+                soup.find('article') or 
+                soup.find('div', {'class': ['content', 'main-content', 'post-content', 'entry-content']}) or
+                soup.find('div', {'id': ['content', 'main-content', 'main']}) or
+                soup.body
+            )
+            
+            if main_content:
+                # Extract headings with hierarchy
+                for heading in main_content.find_all(['h1', 'h2', 'h3', 'h4']):
+                    heading_text = heading.get_text().strip()
+                    if heading_text:
+                        # Add spacing based on heading level for structure
+                        level = int(heading.name[1])
+                        text_parts.append('\n' * (4 - level) + heading_text + '\n')
+                
+                # Extract paragraphs and lists
+                for element in main_content.find_all(['p', 'li']):
+                    element_text = element.get_text().strip()
+                    # Filter out very short paragraphs (likely navigation or ads)
+                    if len(element_text) > 30:
+                        text_parts.append(element_text)
+                
+                # Extract blockquotes
+                for quote in main_content.find_all('blockquote'):
+                    quote_text = quote.get_text().strip()
+                    if quote_text:
+                        text_parts.append(f"\nQuote: {quote_text}\n")
+            
+            # Fallback to basic text extraction if no main content found
+            if not text_parts:
+                text = soup.get_text()
+                lines = (line.strip() for line in text.splitlines())
+                chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+                text_parts = [chunk for chunk in chunks if chunk and len(chunk) > 30]
+            
+            # Join with proper spacing
+            final_text = '\n\n'.join(text_parts)
+            
+            # Clean up excessive whitespace
+            import re
+            final_text = re.sub(r'\n{3,}', '\n\n', final_text)
+            final_text = re.sub(r' {2,}', ' ', final_text)
+            
+            return final_text.strip()
             
         except requests.RequestException as e:
             raise Exception(f"Error fetching URL: {str(e)}")

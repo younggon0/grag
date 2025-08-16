@@ -4,7 +4,7 @@ A robust Streamlit application that converts documents into interactive knowledg
 
 ## Features
 
-- **Document Ingestion**: Upload TXT files, enter text directly, or use sample documents
+- **Document Ingestion**: Upload TXT files, fetch content from URLs, enter text directly, or use sample documents
 - **Entity & Relationship Extraction**: Uses Claude API via LlamaIndex to intelligently extract entities and their relationships
 - **Document Indexing**: Maintains links between entities and source document chunks with full attribution
 - **Interactive Visualization**: Dynamic, physics-enabled graph visualization with Pyvis (optimized for performance)
@@ -79,8 +79,9 @@ The app now uses LlamaIndex for enhanced knowledge graph capabilities:
 
 1. **Input Document**:
    - Upload a TXT file (max 100MB)
-   - Enter a URL to fetch content
-   - Or use the sample document
+   - Enter a URL to fetch HTML content from any website
+   - Enter text directly via text area
+   - Or use one of the sample documents
 
 2. **Build Graph**:
    - Click "Build Knowledge Graph" to process the document
