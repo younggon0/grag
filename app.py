@@ -193,19 +193,18 @@ def process_document(content: str, source_name: str, index: Optional[PropertyGra
         num_workers=4
     )
     
-    # Create or update index
-    if index is None:
-        # Create new index
-        with st.spinner("🔍 Extracting entities and relationships..."):
+    # Single spinner for the entire process
+    with st.spinner("🔍 Extracting entities and relationships..."):
+        if index is None:
+            # Create new index
             index = PropertyGraphIndex.from_documents(
                 [document],
                 property_graph_store=graph_store,
                 kg_extractors=[kg_extractor],
                 show_progress=True
             )
-    else:
-        # Add to existing index using the insert method
-        with st.spinner("🔍 Adding to knowledge graph..."):
+        else:
+            # Add to existing index using the insert method
             try:
                 # Use the insert method to add a single document
                 index.insert(document)
@@ -270,8 +269,9 @@ def create_pyvis_graph(index: PropertyGraphIndex) -> str:
     if not triplets:
         return "<p>No graph data to visualize</p>"
     
-    # Track unique nodes
+    # Track unique nodes and edges to avoid duplicates
     nodes_added = set()
+    edges_added = set()
     
     # Add nodes and edges from triplets
     # LlamaIndex triplets are in the format [EntityNode, Relation, EntityNode]
@@ -312,6 +312,12 @@ def create_pyvis_graph(index: PropertyGraphIndex) -> str:
                 if not subj or not obj or not rel:
                     continue
                 
+                # Create unique edge identifier
+                edge_id = f"{subj}||{rel}||{obj}"
+                if edge_id in edges_added:
+                    continue  # Skip duplicate edges
+                edges_added.add(edge_id)
+                
                 # Add subject node
                 if subj not in nodes_added:
                     # Determine color based on entity type if available
@@ -346,7 +352,7 @@ def create_pyvis_graph(index: PropertyGraphIndex) -> str:
                     )
                     nodes_added.add(obj)
                 
-                # Add edge
+                # Add edge (now guaranteed to be unique)
                 net.add_edge(
                     subj,
                     obj,
@@ -493,31 +499,30 @@ def main():
         
         # Process button
         if content and st.button("🚀 Build Knowledge Graph", type="primary"):
-            with st.spinner("Processing document..."):
-                st.session_state.index = process_document(
-                    content, 
-                    source_name,
-                    st.session_state.index
-                )
-                
-                # Track processed documents
-                if source_name not in st.session_state.documents:
-                    st.session_state.documents.append(source_name)
-                
-                # Create query engine
-                st.session_state.query_engine = st.session_state.index.as_query_engine(
-                    include_text=True,
-                    response_mode="tree_summarize",
-                    verbose=True
-                )
-                
-                st.success(f"✅ Successfully processed: {source_name}")
-                
-                # Clear the current content to avoid reprocessing
-                st.session_state.current_content = None
-                st.session_state.current_source = None
-                
-                st.balloons()
+            st.session_state.index = process_document(
+                content, 
+                source_name,
+                st.session_state.index
+            )
+            
+            # Track processed documents
+            if source_name not in st.session_state.documents:
+                st.session_state.documents.append(source_name)
+            
+            # Create query engine
+            st.session_state.query_engine = st.session_state.index.as_query_engine(
+                include_text=True,
+                response_mode="tree_summarize",
+                verbose=True
+            )
+            
+            st.success(f"✅ Successfully processed: {source_name}")
+            
+            # Clear the current content to avoid reprocessing
+            st.session_state.current_content = None
+            st.session_state.current_source = None
+            
+            st.balloons()
         
         # Graph statistics
         if st.session_state.index:
